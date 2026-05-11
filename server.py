@@ -16,6 +16,8 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 DB_PATH = Path(os.environ.get("PERF_DB_PATH", DATA_DIR / "performance.db"))
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DB_ENGINE = "postgres" if DATABASE_URL else "sqlite"
 HOST = os.environ.get("PERF_HOST", "0.0.0.0")
 PORT = int(os.environ.get("PERF_PORT", "5175"))
 
@@ -26,7 +28,7 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def connect() -> sqlite3.Connection:
+def connect_sqlite() -> sqlite3.Connection:
     DATA_DIR.mkdir(exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -35,28 +37,55 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def connect_postgres():
+    try:
+        import psycopg  # type: ignore
+        from psycopg.rows import dict_row  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("PostgreSQL 模式需要安装依赖：pip install -r requirements.txt") from exc
+
+    return psycopg.connect(DATABASE_URL, autocommit=False, row_factory=dict_row)
+
+
+def connect():
+    if DB_ENGINE == "postgres":
+        return connect_postgres()
+    return connect_sqlite()
+
+
+def placeholders(count: int) -> str:
+    if DB_ENGINE == "postgres":
+        return ", ".join(["%s"] * count)
+    return ", ".join(["?"] * count)
+
+
+def execute(conn, sql: str, params: tuple = ()):
+    if DB_ENGINE == "postgres":
+        sql = sql.replace("?", "%s")
+    return conn.execute(sql, params)
+
+
 def init_db() -> None:
     with connect() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS performance_records (
-                period TEXT NOT NULL,
-                id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                role TEXT NOT NULL,
-                performance_pay REAL NOT NULL DEFAULT 0,
-                base_salary REAL NOT NULL DEFAULT 0,
-                position_salary REAL NOT NULL DEFAULT 0,
-                manager TEXT NOT NULL DEFAULT '',
-                scores_json TEXT NOT NULL DEFAULT '{}',
-                note TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (period, id)
-            )
-            """
+        execute(conn, """
+        CREATE TABLE IF NOT EXISTS performance_records (
+            period TEXT NOT NULL,
+            id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            role TEXT NOT NULL,
+            performance_pay DOUBLE PRECISION NOT NULL DEFAULT 0,
+            base_salary DOUBLE PRECISION NOT NULL DEFAULT 0,
+            position_salary DOUBLE PRECISION NOT NULL DEFAULT 0,
+            manager TEXT NOT NULL DEFAULT '',
+            scores_json TEXT NOT NULL DEFAULT '{}',
+            note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (period, id)
         )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_records_period_name ON performance_records(period, name)")
+        """)
+        execute(conn, "CREATE INDEX IF NOT EXISTS idx_records_period_name ON performance_records(period, name)")
+        conn.commit()
 
 
 def normalize_employee(raw: dict) -> dict:
@@ -82,18 +111,24 @@ def normalize_employee(raw: dict) -> dict:
     }
 
 
-def row_to_employee(row: sqlite3.Row) -> dict:
+def row_value(row, key: str):
+    if isinstance(row, sqlite3.Row):
+        return row[key]
+    return row[key]
+
+
+def row_to_employee(row) -> dict:
     employee = normalize_employee(
         {
-            "id": row["id"],
-            "name": row["name"],
-            "role": row["role"],
-            "performancePay": row["performance_pay"],
-            "baseSalary": row["base_salary"],
-            "positionSalary": row["position_salary"],
-            "manager": row["manager"],
-            "scores": json.loads(row["scores_json"] or "{}"),
-            "note": row["note"],
+            "id": row_value(row, "id"),
+            "name": row_value(row, "name"),
+            "role": row_value(row, "role"),
+            "performancePay": row_value(row, "performance_pay"),
+            "baseSalary": row_value(row, "base_salary"),
+            "positionSalary": row_value(row, "position_salary"),
+            "manager": row_value(row, "manager"),
+            "scores": json.loads(row_value(row, "scores_json") or "{}"),
+            "note": row_value(row, "note"),
         }
     )
     return employee
@@ -101,12 +136,13 @@ def row_to_employee(row: sqlite3.Row) -> dict:
 
 def read_state(period: str) -> dict:
     with connect() as conn:
-        rows = conn.execute(
+        rows = execute(
+            conn,
             """
             SELECT *
             FROM performance_records
             WHERE period = ?
-            ORDER BY name COLLATE NOCASE
+            ORDER BY name
             """,
             (period,),
         ).fetchall()
@@ -117,10 +153,10 @@ def write_state(period: str, employees: list[dict]) -> dict:
     normalized = [normalize_employee(employee) for employee in employees]
     stamp = now_iso()
     with connect() as conn:
-        conn.execute("BEGIN")
-        conn.execute("DELETE FROM performance_records WHERE period = ?", (period,))
+        execute(conn, "DELETE FROM performance_records WHERE period = ?", (period,))
         for employee in normalized:
-            conn.execute(
+            execute(
+                conn,
                 """
                 INSERT INTO performance_records (
                     period, id, name, role, performance_pay, base_salary, position_salary,
@@ -170,7 +206,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
-            self.send_json({"ok": True, "db": str(DB_PATH)})
+            self.send_json({"ok": True, "engine": DB_ENGINE, "db": DATABASE_URL or str(DB_PATH)})
             return
         if parsed.path == "/api/state":
             query = parse_qs(parsed.query)
@@ -222,7 +258,8 @@ def main() -> int:
     init_db()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Performance system listening on http://{HOST}:{PORT}")
-    print(f"SQLite database: {DB_PATH}")
+    print(f"Database engine: {DB_ENGINE}")
+    print(f"Database: {DATABASE_URL or DB_PATH}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

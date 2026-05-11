@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: performance_pay
+      POSTGRES_USER: performance
+      POSTGRES_PASSWORD: change_me
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U performance -d performance_pay"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PERF_HOST: 0.0.0.0
+      PERF_PORT: 5175
+      DATABASE_URL: postgresql://performance:change_me@postgres:5432/performance_pay
+    ports:
+      - "5175:5175"
+
+volumes:
+  postgres_data:
