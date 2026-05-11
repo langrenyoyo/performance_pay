@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-store" />
+    <title>技术开发部门绩效工资管理工具</title>
+    <link rel="stylesheet" href="styles.css?v=20260511-db" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="员工列表">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">绩</div>
+          <div>
+            <h1>绩效工资管理</h1>
+            <p>技术开发部</p>
+          </div>
+        </div>
+
+        <div class="period-card">
+          <label for="periodInput">考核月份</label>
+          <input id="periodInput" type="month" />
+        </div>
+
+        <div class="sidebar-actions">
+          <button class="primary" id="addEmployeeBtn" type="button">新增员工</button>
+          <button id="exportJsonBtn" type="button">导出 JSON</button>
+          <label class="file-button" for="importJsonInput">导入 JSON</label>
+          <input id="importJsonInput" type="file" accept="application/json" />
+        </div>
+
+        <div class="employee-list" id="employeeList"></div>
+      </aside>
+
+      <main class="workspace">
+        <section class="toolbar" aria-label="统计摘要">
+          <div class="stat">
+            <span>人数</span>
+            <strong id="statCount">0</strong>
+          </div>
+          <div class="stat">
+            <span>绩效工资合计</span>
+            <strong id="statBase">¥0</strong>
+          </div>
+          <div class="stat">
+            <span>实发绩效合计</span>
+            <strong id="statPay">¥0</strong>
+          </div>
+          <div class="stat">
+            <span>平均分</span>
+            <strong id="statAvg">0</strong>
+          </div>
+          <div class="toolbar-actions">
+            <button id="openPlanBtn" type="button">查看绩效方案</button>
+            <button id="exportCsvBtn" type="button">导出 CSV</button>
+            <button id="resetDemoBtn" type="button">加载测试数据</button>
+          </div>
+        </section>
+
+        <section class="content-grid">
+          <section class="panel editor-panel" aria-label="员工绩效编辑">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">当前员工</p>
+                <h2 id="editorTitle">请选择员工</h2>
+              </div>
+              <button class="danger ghost" id="deleteEmployeeBtn" type="button">删除</button>
+            </div>
+
+            <form id="employeeForm" class="form-grid">
+              <label>
+                姓名
+                <input id="nameInput" required />
+              </label>
+              <label>
+                岗位
+                <select id="roleInput"></select>
+              </label>
+              <label>
+                绩效工资
+                <input id="performancePayInput" type="number" min="0" step="100" />
+              </label>
+              <label>
+                基础薪资
+                <input id="baseSalaryInput" type="number" min="0" step="100" />
+              </label>
+              <label>
+                岗位薪资
+                <input id="positionSalaryInput" type="number" min="0" step="100" />
+              </label>
+              <label>
+                直属负责人
+                <input id="managerInput" />
+              </label>
+            </form>
+
+            <div class="score-board" id="scoreBoard"></div>
+
+            <label class="wide-label">
+              事实依据与反馈
+              <textarea id="noteInput" rows="5" placeholder="填写交付、质量、协作、风险同步等事实依据"></textarea>
+            </label>
+          </section>
+
+          <section class="panel result-panel" aria-label="绩效结果">
+            <div class="result-top">
+              <div>
+                <p class="eyebrow">计算结果</p>
+                <h2 id="resultLevel">-</h2>
+              </div>
+              <div class="score-ring" id="scoreRing">0</div>
+            </div>
+
+            <dl class="result-list">
+              <div>
+                <dt>绩效工资</dt>
+                <dd id="resultBase">¥0</dd>
+              </div>
+              <div class="highlight">
+                <dt>月度实发绩效</dt>
+                <dd id="resultPay">¥0</dd>
+              </div>
+            </dl>
+
+            <div class="note-box">
+              <h3>评分注解</h3>
+              <p><strong>评分权重</strong>：项目量与工作情况 70%，代码质量 15%，响应时效 10%，其他工作完成情况 5%。</p>
+              <p><strong>单项折算</strong>：单项金额 = 绩效工资 × 权重 × 单项评分 / 100。</p>
+              <p><strong>计算公式</strong>：实发绩效 = 绩效工资 × 总分 / 100。</p>
+            </div>
+
+            <div class="grade-table">
+              <h3>等级换算</h3>
+              <div class="grade-row two-col"><span>S 卓越</span><strong>95+</strong></div>
+              <div class="grade-row two-col"><span>A 优秀</span><strong>85-94</strong></div>
+              <div class="grade-row two-col"><span>B 合格</span><strong>70-84</strong></div>
+              <div class="grade-row two-col"><span>C 待改进</span><strong>60-69</strong></div>
+              <div class="grade-row two-col"><span>D 不合格</span><strong>&lt;60</strong></div>
+            </div>
+          </section>
+        </section>
+
+        <section class="panel table-panel" aria-label="月度绩效汇总">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">月度汇总</p>
+              <h2>绩效工资明细</h2>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="summary-table">
+              <colgroup>
+                <col class="col-name" />
+                <col class="col-role" />
+                <col class="col-score" />
+                <col class="col-level" />
+                <col class="col-money" />
+                <col class="col-money" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>姓名</th>
+                  <th>岗位</th>
+                  <th class="number">总分</th>
+                  <th class="center">等级</th>
+                  <th class="money">绩效工资</th>
+                  <th class="money">实发绩效</th>
+                </tr>
+              </thead>
+              <tbody id="summaryTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="planModal" aria-hidden="true">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="planModalTitle">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">制度文档</p>
+            <h2 id="planModalTitle">技术开发部门绩效工资方案</h2>
+          </div>
+          <button class="ghost modal-close" id="closePlanBtn" type="button" aria-label="关闭">关闭</button>
+        </header>
+        <div class="modal-body" id="planContent">正在加载方案文本...</div>
+      </section>
+    </div>
+
+    <script src="app.js?v=20260511-db"></script>
+  </body>
+</html>
